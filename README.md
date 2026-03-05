@@ -1,26 +1,82 @@
 # Three Lines Email Signature Generator
 
-Automated email signature system for Three Lines Advanced Technologies. Generates standardized, branded HTML signatures from employee data stored in Google Sheets, deployed as a Google Apps Script web app and enforced company-wide via a Microsoft 365 Exchange transport rule.
+## What This Is
+
+This project automates the creation and enforcement of standardized email signatures across all Three Lines employees. Before this system existed, signatures were inconsistent — different fonts, missing logos, no Vision 2030 branding, some employees had no signature at all.
+
+The solution has two layers:
+1. A **self-service web app** (Google Apps Script) where employees enter their email and get a ready-to-paste signature
+2. A **server-side enforcement rule** in Microsoft 365 that automatically appends the signature to every outgoing email — even if the employee never set one up
 
 ---
 
-## How It Works
+## Background: The Problem
 
-1. Employee data is stored in a Google Sheet (name, title, department, email, phone, mobile, extension)
-2. Employees visit the web app URL and enter their company email
-3. The app looks up their data and generates a personalized HTML signature
-4. They copy and paste it into Outlook
-5. Alternatively, the Exchange transport rule automatically appends signatures to all outgoing mail at the server level
+The company needed a unified email signature for all employees that:
+- Showed the employee's name, title, phone, and email
+- Displayed the Three Lines company logo
+- Included the Saudi Vision 2030 logo (required for branding compliance)
+- Had clickable icons for phone, email, location, website, and LinkedIn
+- Worked correctly in Microsoft Outlook without broken images
+
+The challenge was **image hosting**. Free image hosts like imgbb.com are blocked by corporate firewalls and Microsoft's Safe Links policy. Any image hosted there shows as a broken placeholder in Outlook. This was the main technical hurdle — solved by hosting images directly in this GitHub repository and serving them via `raw.githubusercontent.com`, which is trusted by Outlook and corporate networks.
 
 ---
 
-## Signature Design
+## Architecture
 
-- Company logo with vertical blue divider
-- Employee name (bold, brand blue `#0072bc`) and job title
-- Clickable contact icons: phone, email, Google Maps location, website, LinkedIn
-- Saudi Vision 2030 logo
-- Table-based HTML for compatibility with Outlook, Gmail, and Apple Mail
+```
+Google Sheets                   GitHub Repo
+(Employee Data)                 (Image CDN)
+      |                              |
+      |                    logo-removebg-preview.png
+      |                    saudi-vision-2030.png
+      |                              |
+      v                             v
+Google Apps Script Web App  --------+
+(Code.gs)
+      |
+      | generates HTML signature
+      v
+Employee copies signature
+      |
+      v
+Outlook Signature Settings   <-- Option 1: Manual per employee
+      OR
+Microsoft 365 Exchange       <-- Option 2: Auto-enforced on ALL outgoing mail
+Transport Rule
+```
+
+---
+
+## How the Web App Works
+
+1. Employee visits the web app URL (Google Apps Script deployment)
+2. Enters their company email (e.g. `john.doe@3lines.com.sa`)
+3. The script looks up their row in the Google Sheet
+4. Generates a personalized HTML signature with their name, title, phone, etc.
+5. Employee clicks **Copy Signature** and pastes it into Outlook
+
+The entire app lives in one file: `Code.gs`. It is deployed as a Google Apps Script Web App — no servers, no hosting costs.
+
+---
+
+## How the Exchange Transport Rule Works
+
+In **Microsoft 365 Admin Center → Exchange → Mail flow → Rules**, a transport rule was created that:
+- Triggers on: all outgoing mail from the organization
+- Action: append an HTML disclaimer to the bottom of the email
+
+The disclaimer HTML uses Exchange's built-in variables that are automatically replaced with the sender's real data at send time:
+
+| Exchange Variable | Replaced With |
+|-------------------|---------------|
+| `%%DisplayName%%` | Employee's full name |
+| `%%Title%%` | Job title from Active Directory |
+| `%%PhoneNumber%%` | Phone number |
+| `%%EmailAddress%%` | Email address |
+
+This means **every email sent by every employee gets the correct signature automatically**, even employees who never configured one themselves. The rule is enforced at the server level — it cannot be bypassed by the employee.
 
 ---
 
@@ -28,21 +84,35 @@ Automated email signature system for Three Lines Advanced Technologies. Generate
 
 ```
 SignatureGenerator/
-├── Code.gs                    # Google Apps Script — full web app source
-├── logo-removebg-preview.png  # Company logo (hosted on GitHub CDN)
-├── saudi-vision-2030.png      # Saudi Vision 2030 logo (hosted on GitHub CDN)
-├── SampleEmployeeData.csv     # Google Sheet template for employee data
+├── Code.gs                    # Full Google Apps Script source code
+├── logo-removebg-preview.png  # Three Lines company logo
+├── saudi-vision-2030.png      # Saudi Vision 2030 logo
+├── SampleEmployeeData.csv     # Template for the Google Sheet
 ├── DEPLOYMENT.md              # Step-by-step deployment guide
 ├── QUICK_START.md             # Quick reference for admins
 ├── CHANGELOG.md               # Version history
-└── LICENSE                    # License
+└── LICENSE
 ```
 
 ---
 
-## Configuration
+## Google Sheet Structure
 
-All settings are in the `CONFIG` object at the top of `Code.gs`:
+The web app reads employee data from a Google Sheet. The Sheet ID is hardcoded in `Code.gs` under `CONFIG.SHEET_ID`.
+
+Row 1 must be headers. Data starts from row 2. Column order:
+
+| A | B | C | D | E | F | G |
+|---|---|---|---|---|---|---|
+| Name | Title | Department | Email | Phone | Mobile | Extension |
+
+See `SampleEmployeeData.csv` for an example. To add or update an employee, just edit the sheet — no redeployment needed.
+
+---
+
+## Configuration (Code.gs)
+
+All company-specific settings live in the `CONFIG` object at the top of `Code.gs`:
 
 ```javascript
 var CONFIG = {
@@ -59,58 +129,59 @@ var CONFIG = {
 
 ---
 
-## Google Sheet Format
+## Why Images Are Hosted on GitHub
 
-The sheet must have these columns in order (row 1 = headers, data from row 2):
+Early versions hosted images on imgbb.com (a free image host). These images consistently failed to load in Outlook — showing a blue "image not found" placeholder — because:
 
-| A: Name | B: Title | C: Department | D: Email | E: Phone | F: Mobile | G: Extension |
-|---------|----------|---------------|----------|----------|-----------|--------------|
+- imgbb.com is blocked by Microsoft's Safe Links scanning
+- Corporate firewalls block free image hosting domains due to phishing abuse
+- Outlook tries to download and embed images at paste time; if the domain is blocked, the image is lost permanently
 
-See `SampleEmployeeData.csv` for a template.
+**The fix:** commit the actual PNG files to this GitHub repository. GitHub's raw content CDN (`raw.githubusercontent.com`) is a trusted domain that passes corporate firewalls and Outlook's security checks. The image URLs never change as long as the filenames stay the same.
+
+> Important: The repository must remain **public** for the raw URLs to be accessible without authentication.
+
+To update a logo: replace the PNG file, commit, and push. The URL stays the same.
 
 ---
 
-## Deployment (Google Apps Script)
+## Deploying the Google Apps Script Web App
 
-1. Go to [script.google.com](https://script.google.com) and open the project
-2. Paste the full content of `Code.gs`
-3. Run the `authorize` function once to grant Sheets access
-4. Click **Deploy** → **New deployment** → **Web app**
+If the web app ever needs to be redeployed (new account, new project, etc.):
+
+1. Go to [script.google.com](https://script.google.com) and create a new project
+2. Paste the full contents of `Code.gs` into the editor
+3. In the function dropdown, select `authorize` and click **Run** — this grants the script access to Google Sheets (required once per deployment)
+4. Click **Deploy** → **New deployment**
+   - Type: **Web app**
    - Execute as: **Me**
    - Who has access: **Anyone**
-5. Copy the deployment URL — share it with employees
+5. Copy and save the deployment URL
 
-> After any code change, always deploy a **new version** (Deploy → Manage deployments → Edit → New version). Saving the script alone does not update the live URL.
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for full details and troubleshooting.
+> Critical: Every time you change the code, you must deploy a **new version** (Deploy → Manage deployments → Edit → New version → Deploy). Just saving the script does NOT update the live URL. The live URL always serves a frozen version until explicitly updated.
 
 ---
 
-## Microsoft 365 Exchange Transport Rule
+## Lessons Learned / Known Pitfalls
 
-Signatures are also enforced server-side via an Exchange transport rule in Microsoft 365 Admin Center. The rule appends an HTML disclaimer to all outgoing mail using Exchange variables:
-
-| Variable | Value |
-|----------|-------|
-| `%%DisplayName%%` | Employee full name |
-| `%%Title%%` | Job title |
-| `%%PhoneNumber%%` | Phone number |
-| `%%EmailAddress%%` | Email address |
-
-This ensures every outbound email carries a signature even if the employee did not set one manually.
+| Problem | Cause | Solution |
+|---------|-------|----------|
+| Images broken in Outlook | imgbb.com blocked by firewall / Safe Links | Host images on GitHub raw CDN |
+| Web app showing blank page | Script not authorized to access Google Sheets | Run `authorize()` function once in GAS editor |
+| Web app not updating after code change | GAS serves a frozen deployment version | Deploy a new version every time code changes |
+| Raw GitHub URL returning 404 | Repository was private | Repository must be public for raw URLs to work |
+| `e.parameter` error in GAS editor | `doGet(e)` called without a request object when run manually | Defensive check: `(e && e.parameter && e.parameter.email)` |
 
 ---
 
-## Image Hosting
+## Current Live Status
 
-Both logo images are committed to this public GitHub repository and served via `raw.githubusercontent.com`. This CDN is trusted by Outlook and corporate firewalls, unlike free image hosts (e.g. imgbb.com) which are typically blocked.
-
-To update an image:
-1. Replace the PNG file in this repo
-2. Commit and push — the CDN URL stays the same
+- Web app: deployed on Google Apps Script (URL shared with IT team)
+- Exchange rule: active in Microsoft 365, enforced on all outgoing mail
+- All employees: covered by the server-side rule regardless of manual setup
 
 ---
 
-## Support
+## Contact
 
-Contact IT for access issues or to add/update employee data in the Google Sheet.
+For questions about this system, contact the IT team. For employee data changes, update the Google Sheet directly.
